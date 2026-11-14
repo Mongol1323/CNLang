@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>汉语 — учим китайский</title>
+<style>
+:root{--bg:#e8eeeb;--card:#f8fbf9;--ink:#17262f;--mute:#62747b;--acc:#2c6e61;--line:#c5d3cd}
+@media (prefers-color-scheme:dark){:root{--bg:#10191d;--card:#18252b;--ink:#e6eeea;--mute:#8da0a6;--acc:#5bb7a3;--line:#2e4249}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:680px;margin:0 auto;padding:24px 16px 64px}
+.hz{font-family:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif}
+header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:20px}
+h1{margin:0;font-size:22px;font-weight:600}
+h1 .hz{font-size:28px;margin-right:10px;color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+input,button{font:inherit;padding:9px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{cursor:pointer;background:var(--acc);color:var(--card);border:0;font-weight:600}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:400}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row input{flex:1;min-width:120px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs [data-t].on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.word{display:grid;grid-template-columns:84px 1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.word:first-child{border-top:0}
+.word .hz{font-size:30px}
+.mute{color:var(--mute)}
+.msg{color:#c0392b;min-height:1.4em;margin:8px 0 0}
+.flash{text-align:center;cursor:pointer;padding:28px 12px}
+.grid{width:210px;height:210px;margin:0 auto 14px;border:2px solid var(--ink);display:grid;place-items:center;
+ background:
+ linear-gradient(var(--line),var(--line)) 50% 0/1px 100% no-repeat,
+ linear-gradient(var(--line),var(--line)) 0 50%/100% 1px no-repeat,
+ linear-gradient(to top right,transparent calc(50% - .5px),var(--line) calc(50% - .5px),var(--line) calc(50% + .5px),transparent calc(50% + .5px)),
+ linear-gradient(to bottom right,transparent calc(50% - .5px),var(--line) calc(50% - .5px),var(--line) calc(50% + .5px),transparent calc(50% + .5px))}
+.grid .hz{font-size:112px;line-height:1}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1><span class="hz">汉语</span>Учим китайский</h1><div id="who" class="mute"></div></header>
+
+  <section id="auth" class="card">
+    <div class="row">
+      <input id="u" placeholder="Имя (от 3 символов)" autocomplete="username">
+      <input id="mail" type="email" placeholder="Почта" autocomplete="email">
+      <input id="p" type="password" placeholder="Пароль (от 8 символов)" autocomplete="current-password">
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="login">Войти</button>
+      <button id="reg" class="ghost">Создать аккаунт</button>
+    </div>
+    <p class="msg" id="amsg"></p>
+  </section>
+
+  <main id="app" hidden>
+    <div class="tabs">
+      <button data-t="words" class="on">Слова</button>
+      <button data-t="cards" class="ghost" data-t2>Карточки</button>
+      <button id="out" class="ghost" style="margin-left:auto">Выйти</button>
+    </div>
+
+    <div id="t-words">
+      <div class="card">
+        <div class="row">
+          <input id="h" placeholder="Иероглиф" class="hz">
+          <input id="py" placeholder="Пиньинь">
+          <input id="tr" placeholder="Перевод">
+          <input id="lv" type="number" min="1" max="6" placeholder="HSK" style="max-width:80px;flex:0 0 80px">
+        </div>
+        <div class="row" style="margin-top:10px"><button id="add">Добавить слово</button></div>
+        <p class="msg" id="wmsg"></p>
+      </div>
+      <div class="card" id="list"></div>
+    </div>
+
+    <div id="t-cards" hidden>
+      <div class="card flash" id="flash"></div>
+      <div class="row" style="justify-content:center"><button id="next">Следующее слово</button></div>
+    </div>
+  </main>
+</div>
+
+<script>
+// Если открыл файл напрямую - стучимся на локальный сервер; если отдаёт FastAPI - на тот же адрес.
+const API = location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let token = null, words = [], cur = null, flipped = false;
+try { token = localStorage.getItem('token'); } catch (e) {}
+
+function setToken(t) {
+  token = t;
+  try { t ? localStorage.setItem('token', t) : localStorage.removeItem('token'); } catch (e) {}
+}
+
+// Одна функция для всех запросов: сама добавляет токен и превращает ошибки в понятный текст.
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  let r;
+  try { r = await fetch(API + path, { ...opts, headers }); }
+  catch (e) { throw new Error('Сервер не отвечает. Он запущен?'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 401 && token) showAuth();  // токен протух: возвращаем на вход
+    const d = data.detail;
+    throw new Error(Array.isArray(d) ? d.map(x => x.loc.slice(1).join('.') + ': ' + x.msg).join('; ') : d || 'Ошибка ' + r.status);
+  }
+  return data;
+}
+const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+async function auth(register) {
+  const u = $('u').value.trim();
+  const mail = $('mail').value.trim();
+  const p = $('p').value;
+  $('amsg').textContent = '';
+  try {
+    if (register) await api('/register', json({ username: u, email: mail, password: p }));
+    // /login ждёт обычную форму, а не JSON, и почта ему не нужна
+    const d = await api('/login', { method: 'POST', body: new URLSearchParams({ username: u, password: p }) });
+    setToken(d.access_token);
+    await start();
+  } catch (e) { $('amsg').textContent = e.message; }
+}
+
+function showAuth() {
+  setToken(null);
+  $('auth').hidden = false; $('app').hidden = true; $('who').textContent = '';
+}
+
+async function start() {
+  if (!token) return showAuth();
+  try {
+    const me = await api('/me');
+    $('who').textContent = me.username;
+    $('auth').hidden = true; $('app').hidden = false;
+  } catch (e) { return showAuth(); }
+  try { await loadWords(); } catch (e) { $('wmsg').textContent = e.message; }
+}
+
+async function loadWords() {
+  words = await api('/words?limit=200');
+  $('list').innerHTML = words.length
+    ? words.map(w => `<div class="word"><div class="hz">${esc(w.hanzi)}</div>
+        <div><div>${esc(w.pinyin)}</div><div class="mute">${esc(w.translation)}</div></div>
+        <div class="mute">${w.hsk_lvl ? 'HSK ' + w.hsk_lvl : ''}</div></div>`).join('')
+    : '<p class="mute">Слов пока нет. Добавь первое в форме выше.</p>';
+  nextCard();
+}
+
+async function addWord() {
+  const body = { hanzi: $('h').value.trim(), pinyin: $('py').value.trim(), translation: $('tr').value.trim() };
+  const lvl = parseInt($('lv').value);
+  if (lvl) body.hsk_lvl = lvl;
+  $('wmsg').textContent = '';
+  try {
+    await api('/words', json(body));
+    ['h', 'py', 'tr', 'lv'].forEach(i => $(i).value = '');
+    await loadWords();
+  } catch (e) { $('wmsg').textContent = e.message; }
+}
+
+function drawCard() {
+  $('flash').innerHTML = `<div class="grid"><span class="hz">${esc(cur.hanzi)}</span></div>` + (flipped
+    ? `<div style="font-size:24px">${esc(cur.pinyin)}</div><div class="mute" style="font-size:20px">${esc(cur.translation)}</div>`
+    : '<p class="mute">Нажми на карточку, чтобы увидеть перевод</p>');
+}
+
+function nextCard() {
+  flipped = false;
+  if (!words.length) { cur = null; $('flash').innerHTML = '<p class="mute">Сначала добавь слова на вкладке «Слова».</p>'; return; }
+  let w;
+  do { w = words[Math.floor(Math.random() * words.length)]; } while (words.length > 1 && w === cur);
+  cur = w; drawCard();
+}
+
+$('login').onclick = () => auth(false);
+$('reg').onclick = () => auth(true);
+$('out').onclick = showAuth;
+$('add').onclick = addWord;
+$('next').onclick = nextCard;
+$('flash').onclick = () => { if (cur) { flipped = !flipped; drawCard(); } };
+document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-t]').forEach(x => { x.classList.toggle('on', x === b); x.classList.toggle('ghost', x !== b); });
+  $('t-words').hidden = b.dataset.t !== 'words';
+  $('t-cards').hidden = b.dataset.t !== 'cards';
+});
+start();
+</script>
+</body>
+</html>

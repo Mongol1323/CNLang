@@ -20,7 +20,11 @@ def health(db: Session = Depends(get_db)):
 
 
 @app.post("/words", response_model=schemas.WordOut)
-def create_word(word: schemas.WordCreate, db: Session = Depends(get_db)):
+def create_word(
+    word: schemas.WordCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+):
     new_word = models.Word(**word.model_dump())
     db.add(new_word)
     db.commit()
@@ -47,6 +51,7 @@ def register(data: schemas.UserCreate, db: Session = Depends(get_db)):
 
     user = models.User(
         username=data.username,
+        email=data.email,
         hashed_password=security.hash_password(data.password),
     )
     db.add(user)
