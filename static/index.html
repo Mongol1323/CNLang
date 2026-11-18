@@ -47,7 +47,7 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
     <div class="row">
       <input id="u" placeholder="Имя (от 3 символов)" autocomplete="username">
       <input id="mail" type="email" placeholder="Почта" autocomplete="email">
-      <input id="p" type="password" placeholder="Пароль (от 8 символов)" autocomplete="current-password">
+      <input id="p" type="password" placeholder="Пароль (от 6 символов)" autocomplete="current-password">
     </div>
     <div class="row" style="margin-top:10px">
       <button id="login">Войти</button>
@@ -79,7 +79,11 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
 
     <div id="t-cards" hidden>
       <div class="card flash" id="flash"></div>
-      <div class="row" style="justify-content:center"><button id="next">Следующее слово</button></div>
+      <div class="row" id="answers" style="justify-content:center" hidden>
+  <button id="no" class="ghost">Не знаю</button>
+  <button id="yes">Знаю</button>
+</div>
+<p class="msg" id="cmsg" style="text-align:center"></p>
     </div>
   </main>
 </div>
@@ -150,7 +154,7 @@ async function loadWords() {
         <div><div>${esc(w.pinyin)}</div><div class="mute">${esc(w.translation)}</div></div>
         <div class="mute">${w.hsk_lvl ? 'HSK ' + w.hsk_lvl : ''}</div></div>`).join('')
     : '<p class="mute">Слов пока нет. Добавь первое в форме выше.</p>';
-  nextCard();
+
 }
 
 async function addWord() {
@@ -165,30 +169,59 @@ async function addWord() {
   } catch (e) { $('wmsg').textContent = e.message; }
 }
 
+let queue = [];  // карточки на сегодня
+
+// Берём с сервера, что учить сегодня: сначала повторения, потом новые слова
+async function loadStudy() {
+  $('cmsg').textContent = '';
+  const d = await api('/study/today');
+  queue = [...d.due.map(w => ({ ...w, isNew: false })), ...d.new.map(w => ({ ...w, isNew: true }))];
+  nextCard();
+}
+
 function drawCard() {
+  $('answers').hidden = !flipped;  // кнопки ответа видны, только когда карточка перевёрнута
   $('flash').innerHTML = `<div class="grid"><span class="hz">${esc(cur.hanzi)}</span></div>` + (flipped
     ? `<div style="font-size:24px">${esc(cur.pinyin)}</div><div class="mute" style="font-size:20px">${esc(cur.translation)}</div>`
-    : '<p class="mute">Нажми на карточку, чтобы увидеть перевод</p>');
+    : '<p class="mute">Нажми на карточку, чтобы увидеть перевод</p>')
+    + `<p class="mute" style="font-size:13px">${cur.isNew ? 'новое слово' : 'повторение'} · ещё в очереди: ${queue.length}</p>`;
 }
 
 function nextCard() {
   flipped = false;
-  if (!words.length) { cur = null; $('flash').innerHTML = '<p class="mute">Сначала добавь слова на вкладке «Слова».</p>'; return; }
-  let w;
-  do { w = words[Math.floor(Math.random() * words.length)]; } while (words.length > 1 && w === cur);
-  cur = w; drawCard();
+  cur = queue.shift() || null;  // shift достаёт первую карточку из очереди
+  if (!cur) {
+    $('answers').hidden = true;
+    $('flash').innerHTML = '<p class="mute">На сегодня всё. Возвращайся завтра!</p>';
+    return;
+  }
+  drawCard();
+}
+
+let busy = false;  // идёт ли сейчас отправка ответа
+
+async function answer(known) {
+  if (busy) return;  // второй клик, пока первый не закончился, игнорируем
+  busy = true;
+  try {
+    await api('/study/answer', json({ word_id: cur.id, known }));
+    nextCard();
+  } catch (e) { $('cmsg').textContent = e.message; }
+  finally { busy = false; }
 }
 
 $('login').onclick = () => auth(false);
 $('reg').onclick = () => auth(true);
 $('out').onclick = showAuth;
 $('add').onclick = addWord;
-$('next').onclick = nextCard;
+$('yes').onclick = () => answer(true);
+$('no').onclick = () => answer(false);
 $('flash').onclick = () => { if (cur) { flipped = !flipped; drawCard(); } };
 document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
   document.querySelectorAll('[data-t]').forEach(x => { x.classList.toggle('on', x === b); x.classList.toggle('ghost', x !== b); });
   $('t-words').hidden = b.dataset.t !== 'words';
   $('t-cards').hidden = b.dataset.t !== 'cards';
+    if (b.dataset.t === 'cards') loadStudy().catch(e => $('cmsg').textContent = e.message);
 });
 start();
 </script>
