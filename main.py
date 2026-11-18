@@ -3,10 +3,13 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 import security
+from datetime import datetime, timezone
+import srs
 
 from database import get_db, engine, Base
 import models
 import schemas
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -75,5 +78,63 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 def me(current_user: models.User = Depends(security.get_current_user)):
     return current_user
 from fastapi.staticfiles import StaticFiles
+
+@app.get("/study/today", response_model=schemas.StudyToday)
+def study_today(
+    new_limit: int = 5,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    now = datetime.now(timezone.utc)
+
+    # Слова на повторение: у этого пользователя есть прогресс, и срок уже пришёл
+    due = db.scalars(
+        select(models.Word)
+        .join(models.Progress, models.Progress.word_id == models.Word.id)
+        .where(models.Progress.user_id == current_user.id, models.Progress.next_review <= now)
+        .order_by(models.Progress.next_review)
+    ).all()
+
+    # Новые слова: у этого пользователя по ним ещё нет прогресса
+    seen = select(models.Progress.word_id).where(models.Progress.user_id == current_user.id)
+    new = db.scalars(
+        select(models.Word)
+        .where(models.Word.id.not_in(seen))
+        .order_by(models.Word.id)
+        .limit(new_limit)
+    ).all()
+
+    return {"due": due, "new": new}
+
+
+@app.post("/study/answer", response_model=schemas.ProgressOut)
+def study_answer(
+    data: schemas.AnswerIn,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    if db.get(models.Word, data.word_id) is None:
+        raise HTTPException(status_code=404, detail="Word not found")
+
+    progress = db.scalar(
+        select(models.Progress).where(
+            models.Progress.user_id == current_user.id,
+            models.Progress.word_id == data.word_id,
+        )
+    )
+    if progress is None:
+        # Первый ответ на это слово: заводим строку прогресса
+        progress = models.Progress(
+            user_id=current_user.id,
+            word_id=data.word_id,
+            level=0,
+            next_review=datetime.now(timezone.utc),
+        )
+        db.add(progress)
+
+    srs.apply_answer(progress, data.known)
+    db.commit()
+    db.refresh(progress)
+    return progress
 
 app.mount("/site", StaticFiles(directory="static", html=True), name="site")
