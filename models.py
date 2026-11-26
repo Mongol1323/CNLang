@@ -15,6 +15,7 @@ class Word(Base):
 class User(Base):
     __tablename__ = "users"
 
+    start_level = Column(Integer, default=0, nullable=False) # с какого уровня хск давать новые слова
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(100), nullable=False)

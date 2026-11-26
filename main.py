@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select, text, or_
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 import security
@@ -79,6 +79,17 @@ def me(current_user: models.User = Depends(security.get_current_user)):
     return current_user
 from fastapi.staticfiles import StaticFiles
 
+@app.put("/me/level", response_model=schemas.UserOut)
+def set_level(
+    data: schemas.LevelIn,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    current_user.start_level = data.start_level
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
 @app.get("/study/today", response_model=schemas.StudyToday)
 def study_today(
     new_limit: int = 5,
@@ -99,8 +110,12 @@ def study_today(
     seen = select(models.Progress.word_id).where(models.Progress.user_id == current_user.id)
     new = db.scalars(
         select(models.Word)
-        .where(models.Word.id.not_in(seen))
-        .order_by(models.Word.id)
+        .where(
+            models.Word.id.not_in(seen),
+            # слова нужного уровня и выше, а также слова без уровня (добавленные руками)
+            or_(models.Word.hsk_lvl.is_(None), models.Word.hsk_lvl >= current_user.start_level),
+        )
+        .order_by(models.Word.hsk_lvl, models.Word.id)  # сначала лёгкие уровни
         .limit(new_limit)
     ).all()
 

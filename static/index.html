@@ -15,7 +15,7 @@ header{display:flex;justify-content:space-between;align-items:baseline;margin-bo
 h1{margin:0;font-size:22px;font-weight:600}
 h1 .hz{font-size:28px;margin-right:10px;color:var(--acc)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
-input,button{font:inherit;padding:9px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+input,button,select{font:inherit;padding:9px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 button{cursor:pointer;background:var(--acc);color:var(--card);border:0;font-weight:600}
 button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:400}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
@@ -78,6 +78,13 @@ button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line
     </div>
 
     <div id="t-cards" hidden>
+      <div class="row" style="align-items:center;margin-bottom:12px">
+        <span class="mute">Начинать с уровня HSK</span>
+        <select id="lvl">
+          <option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option><option>6</option>
+        </select>
+      </div>
       <div class="card flash" id="flash"></div>
       <div class="row" id="answers" style="justify-content:center" hidden>
   <button id="no" class="ghost">Не знаю</button>
@@ -142,6 +149,7 @@ async function start() {
   try {
     const me = await api('/me');
     $('who').textContent = me.username;
+        $('lvl').value = me.start_level;
     $('auth').hidden = true; $('app').hidden = false;
   } catch (e) { return showAuth(); }
   try { await loadWords(); } catch (e) { $('wmsg').textContent = e.message; }
@@ -210,6 +218,13 @@ async function answer(known) {
   finally { busy = false; }
 }
 
+$('lvl').onchange = async () => {
+  try {
+    // json() делает POST, а нам нужен PUT, поэтому метод подменяем
+    await api('/me/level', { ...json({ start_level: parseInt($('lvl').value) }), method: 'PUT' });
+    await loadStudy();  // сразу обновляем очередь карточек
+  } catch (e) { $('cmsg').textContent = e.message; }
+};
 $('login').onclick = () => auth(false);
 $('reg').onclick = () => auth(true);
 $('out').onclick = showAuth;

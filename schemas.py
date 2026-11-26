@@ -27,6 +27,7 @@ class UserOut(BaseModel):
     id: int
     username: str  # пароль и хеш наружу не отдаём
     email: str
+    start_level: int
 
 
 class Token(BaseModel):
@@ -54,3 +55,7 @@ class ProgressOut(BaseModel):
 class StudyToday(BaseModel):
     due: list[WordOut]
     new: list[WordOut]
+
+# Что присылает клиент, когда меняет свой уровень
+class LevelIn(BaseModel):
+    start_level: int = Field(ge=1, le=6)  # ge: не меньше 1, le: не больше 6
